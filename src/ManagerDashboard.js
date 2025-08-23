@@ -3,8 +3,21 @@ import axios from 'axios';
 import io from 'socket.io-client';
 import DraftBoard from './DraftBoard';
 
-// Connect to same-origin; allow fallback if WS blocked
+// same-origin WS
 const socket = io();
+
+// lil helper so names always show (flat obj or nested {row:{...}})
+const displayName = (p) => {
+  if (!p) return '';
+  const obj = p.row || p;
+  return (
+    (obj.name && String(obj.name).trim()) ||
+    [obj.firstName, obj.lastName].filter(Boolean).join(' ') ||
+    obj['First & Last Name'] ||
+    [obj['First Name'], obj['Last Name']].filter(Boolean).join(' ') ||
+    ''
+  );
+};
 
 function ManagerDashboard() {
   const [file, setFile] = useState(null);
@@ -20,11 +33,10 @@ function ManagerDashboard() {
   const [teamRosters, setTeamRosters] = useState([]);
   const [currentDraft, setCurrentDraft] = useState([]);
 
-  const handleFileChange = (e) => {
-    setFile(e.target.files[0]);
-  };
+  const handleFileChange = (e) => setFile(e.target.files[0]);
 
   const handleUpload = async () => {
+    if (!file) return;
     const formData = new FormData();
     formData.append('file', file);
     try {
@@ -48,7 +60,15 @@ function ManagerDashboard() {
     }
   };
 
+  // 🚫 guard: don’t accidentally reset an already-running draft
   const startDraft = async () => {
+    try {
+      const probe = await axios.get('/api/draft-state').catch(() => axios.get('/api/state'));
+      if (probe?.data?.draftStarted) {
+        console.log('Draft already started; not restarting.');
+        return;
+      }
+    } catch { /* ignore and try start */ }
     try {
       const res = await axios.post('/api/start-draft');
       console.log('Draft started:', res.data);
@@ -63,25 +83,72 @@ function ManagerDashboard() {
       console.log('Draft pick recorded:', res.data);
     } catch (err) {
       console.error(err);
-      alert(err.response.data.message || 'Error making draft pick');
+      alert(err?.response?.data?.message || 'Error making draft pick');
+    }
+  };
+
+  // 💾 hydrate UI from server on reload (fixes the “refresh wipes UI”)
+  const applyState = (data = {}) => {
+    const dc = data.draftConfig || {};
+    setActiveTeam(
+      typeof data.activeTeam === 'number'
+        ? data.activeTeam
+        : typeof dc.activeTeam === 'number'
+        ? dc.activeTeam
+        : null
+    );
+    setAvailablePlayers(Array.isArray(data.availablePlayers) ? data.availablePlayers : []);
+    // prefer top-level teamRosters; fall back to draftConfig.teamRosters if server packs it there
+    const rosters = Array.isArray(data.teamRosters)
+      ? data.teamRosters
+      : Array.isArray(dc.teamRosters)
+      ? dc.teamRosters
+      : [];
+    setTeamRosters(rosters);
+    setCurrentDraft(Array.isArray(data.currentDraft) ? data.currentDraft : []);
+
+    // sync config UI to server’s config so team names line up
+    if (dc && (dc.numberOfTeams || dc.teamNames || dc.picksPerTeam || dc.draftType)) {
+      const teamNamesCSV = Array.isArray(dc.teamNames)
+        ? dc.teamNames.join(',')
+        : (dc.teamNames || config.teamNames);
+      setConfig((prev) => ({
+        ...prev,
+        numberOfTeams: dc.numberOfTeams ?? prev.numberOfTeams,
+        teamNames: teamNamesCSV,
+        picksPerTeam: dc.picksPerTeam ?? prev.picksPerTeam,
+        draftType: dc.draftType ?? prev.draftType
+      }));
+    }
+  };
+
+  const fetchState = async () => {
+    try {
+      // hit /api/draft-state; if your server only has /api/state, we fall back
+      const { data } = await axios.get('/api/draft-state').catch(() => axios.get('/api/state'));
+      if (data) applyState(data);
+    } catch (err) {
+      console.warn('GET state failed (maybe not started yet):', err?.message);
     }
   };
 
   useEffect(() => {
+    // 1) snapshot on mount (critical for reload)
+    fetchState();
+
+    // 2) live sockets
     socket.on('draftStarted', (data) => {
       console.log('Socket draftStarted:', data);
-      setActiveTeam(data.draftConfig.activeTeam);
-      setAvailablePlayers(data.availablePlayers);
-      setTeamRosters(data.draftConfig.teamRosters);
-      setCurrentDraft([]);
+      applyState({
+        ...data,
+        // some servers embed teamRosters inside draftConfig on start
+        teamRosters: data?.teamRosters || data?.draftConfig?.teamRosters || []
+      });
     });
 
     socket.on('draftUpdate', (data) => {
       console.log('Socket draftUpdate:', data);
-      setActiveTeam(data.activeTeam);
-      setAvailablePlayers(data.availablePlayers);
-      setTeamRosters(data.teamRosters);
-      setCurrentDraft(data.currentDraft);
+      applyState(data);
     });
 
     return () => {
@@ -90,16 +157,23 @@ function ManagerDashboard() {
     };
   }, []);
 
-  // Compute team names from config and create the board columns accordingly
-  const teamNamesFromConfig = config.teamNames.split(',').map(name => name.trim());
+  // Board columns from config (string of names)
+  const teamNamesFromConfig = (config.teamNames || '')
+    .split(',')
+    .map(name => name.trim());
+
   const teamsForBoard = teamRosters.map((_, index) => ({
     id: index,
     name: teamNamesFromConfig[index] || `Team ${index + 1}`
   }));
 
-  // Compute the number of rounds and draft board picks based on team rosters
-  const maxRounds = teamRosters.length > 0 ? Math.max(...teamRosters.map(roster => roster.length)) : 0;
+  // rounds & picks from rosters
+  const maxRounds = teamRosters.length > 0
+    ? Math.max(...teamRosters.map(roster => roster.length))
+    : 0;
+
   const roundsForBoard = Array.from({ length: maxRounds }, (_, i) => i + 1);
+
   const picksForBoard = roundsForBoard.map((_, roundIndex) => {
     const roundPicks = {};
     teamsForBoard.forEach((team) => {
@@ -120,7 +194,7 @@ function ManagerDashboard() {
       <div className="section">
         <h3>Upload Player CSV</h3>
         <input type="file" accept=".csv" onChange={handleFileChange} />
-        <button className="button" onClick={handleUpload}>Upload CSV</button>
+        <button className="button" onClick={handleUpload} disabled={!file}>Upload CSV</button>
       </div>
 
       <div className="section">
@@ -160,88 +234,76 @@ function ManagerDashboard() {
         {activeTeam === null ? (
           <p>{availablePlayers.length === 0 ? "Draft complete" : "Draft not started or waiting..."}</p>
         ) : (
-          
           <>
             <p>Active Team: Team {activeTeam + 1}</p>
             <h4>Available Players</h4>
-              <div className="players-table-wrap">
-                <table className="players-table">
-                  {/* fixed column widths so nothing jiggles when content changes */}
-                  <colgroup>
-                    <col style={{ width: 48 }} />     {/* # */}
-                    <col style={{ width: '28%' }} />  {/* Name */}
-                    <col style={{ width: '10%' }} />  {/* Pos */}
-                    <col style={{ width: '14%' }} />  {/* Skill */}
-                    <col style={{ width: '8%' }} />   {/* Ht */}
-                    <col style={{ width: '10%' }} />  {/* Shirt */}
-                    <col style={{ width: '20%' }} />  {/* Comparison */}
-                    <col style={{ width: 80 }} />     {/* Action */}
-                  </colgroup>
-
-                  <thead>
-                    <tr>
-                      <th>#</th>
-                      <th>Name</th>
-                      <th>Pos</th>
-                      <th>Skill</th>
-                      <th>Ht</th>
-                      <th>Shirt</th>
-                      <th>Comparison</th>
-                      <th></th>
-                    </tr>
-                  </thead>
-
-                  <tbody>
-                    {availablePlayers.map((p, i) => {
-                      const name =
-                        (p.name && p.name.trim()) ||
-                        [p.firstName, p.lastName].filter(Boolean).join(' ') ||
-                        p['First & Last Name'] ||
-                        [p['First Name'], p['Last Name']].filter(Boolean).join(' ');
-
-                      const pos   = p.position || p.fieldPosition || '';
-                      const skill = p.skill || p.skillLevel || '';
-                      const ht    = p.height || '';
-                      const shirt = p.jersey || p.jerseySize || '';
-                      const comp  = p.resemblance || '';
-
-                      return (
-                        <tr key={p.id || i}>
-                          <td>{i + 1}</td>
-                          <td><strong>{name}</strong></td>
-                          <td>{pos}</td>
-                          <td>{skill}</td>
-                          <td>{ht}</td>
-                          <td>{shirt}</td>
-                          <td className="ellipsis" title={comp}>{comp}</td>
-                          <td>
-                            <button className="button button-xs" onClick={() => handleDraftPick(p.id)}>
-                              Draft
-                            </button>
-                          </td>
-                        </tr>
-                      );
-                    })}
-
-                    {/* --- ghost rows to keep height rock solid (optional but nice) --- */}
-                    {Array.from({
-                      length: Math.max(0, 14 - availablePlayers.length) // target 14 rows visible
-                    }).map((_, idx) => (
-                      <tr className="ghost-row" key={`ghost-${idx}`}>
-                        <td colSpan={8}>&nbsp;</td>
+            <div className="players-table-wrap">
+              <table className="players-table">
+                <colgroup>
+                  <col style={{ width: 48 }} />
+                  <col style={{ width: '28%' }} />
+                  <col style={{ width: '10%' }} />
+                  <col style={{ width: '14%' }} />
+                  <col style={{ width: '8%' }} />
+                  <col style={{ width: '10%' }} />
+                  <col style={{ width: '20%' }} />
+                  <col style={{ width: 80 }} />
+                </colgroup>
+                <thead>
+                  <tr>
+                    <th>#</th>
+                    <th>Name</th>
+                    <th>Pos</th>
+                    <th>Skill</th>
+                    <th>Ht</th>
+                    <th>Shirt</th>
+                    <th>Comparison</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {availablePlayers.map((p, i) => {
+                    const obj = p.row || p;
+                    const name  = displayName(p);
+                    const pos   = obj.position || obj.fieldPosition || '';
+                    const skill = obj.skill || obj.skillLevel || '';
+                    const ht    = obj.height || '';
+                    const shirt = obj.jersey || obj.jerseySize || '';
+                    const comp  = obj.resemblance || '';
+                    return (
+                      <tr key={p.id || i}>
+                        <td>{i + 1}</td>
+                        <td><strong>{name}</strong></td>
+                        <td>{pos}</td>
+                        <td>{skill}</td>
+                        <td>{ht}</td>
+                        <td>{shirt}</td>
+                        <td className="ellipsis" title={comp}>{comp}</td>
+                        <td>
+                          <button className="button button-xs" onClick={() => handleDraftPick(p.id)}>
+                            Draft
+                          </button>
+                        </td>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+                    );
+                  })}
+                  {Array.from({ length: Math.max(0, 14 - availablePlayers.length) }).map((_, idx) => (
+                    <tr className="ghost-row" key={`ghost-${idx}`}>
+                      <td colSpan={8}>&nbsp;</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </>
         )}
       </div>
-        
+
       <div className="section">
         <h3>Draft Board</h3>
         <DraftBoard teams={teamsForBoard} rounds={roundsForBoard} picks={picksForBoard} />
       </div>
+
       <div className="section">
         <h3>Team Rosters</h3>
         {teamRosters.map((roster, teamIndex) => (
@@ -250,9 +312,7 @@ function ManagerDashboard() {
             {roster.length > 0 ? (
               <ul>
                 {roster.map((player, index) => (
-                  <li key={index}>
-                    {player["name"]}
-                  </li>
+                  <li key={index}>{displayName(player)}</li>
                 ))}
               </ul>
             ) : (
@@ -265,24 +325,22 @@ function ManagerDashboard() {
       <div className="section">
         <h3>Draft Picks History</h3>
         <ul>
-          {currentDraft.map((pick, index) => (
-            <li key={index}>
-              {teamNamesFromConfig[pick.team] || `Team ${pick.team + 1}`} picked {pick.player['name']} 
-            </li>
-          ))}
+          {currentDraft.map((pick, index) => {
+            const teamIdx = pick.team ?? pick.teamId ?? pick.teamIndex ?? null;
+            const playerObj = pick.player ?? pick.pick ?? pick.draftPick ?? pick;
+            const teamName = teamIdx != null
+              ? (teamNamesFromConfig[teamIdx] || `Team ${teamIdx + 1}`)
+              : 'Team ?';
+            return (
+              <li key={index}>
+                {teamName} picked {displayName(playerObj)}
+              </li>
+            );
+          })}
         </ul>
       </div>
-{/* 
-      <div className="section">
-        <h3>Draft Board</h3>
-        <DraftBoard teams={teamsForBoard} rounds={roundsForBoard} picks={picksForBoard} />
-      </div> */}
     </div>
   );
 }
 
 export default ManagerDashboard;
-
-
-
-

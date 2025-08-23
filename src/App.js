@@ -4,6 +4,7 @@ import { BrowserRouter as Router, Routes, Route, Link, Navigate } from 'react-ro
 import ManagerDashboard from './ManagerDashboard';
 import SpectatorView from './SpectatorView';
 import ManagerLogin from './ManagerLogin';
+import CaptainDashboard from './CaptainDashboard';
 import {
   Box,
   CssBaseline,
@@ -83,6 +84,11 @@ function App() {
                 <ListItemButton component={Link} to="/spectator">
                   <ListItemText primary="Spectator View" variant='h4'/>
                 </ListItemButton>
+              </ListItem>           
+              <ListItem disablePadding>
+                <ListItemButton component={Link} to="/captain">
+                  <ListItemText primary="Captain Dashboard" />
+                </ListItemButton>
               </ListItem>
             </List>
           </Drawer>
@@ -106,6 +112,7 @@ function App() {
                   </ProtectedRoute>
                 }
               />
+              <Route path="/captain" element={<CaptainDashboard />} />
               <Route path="/spectator" element={<SpectatorView />} />
               <Route
                 path="/"
