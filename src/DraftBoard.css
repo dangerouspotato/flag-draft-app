@@ -1,0 +1,16 @@
+.draft-board table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+  
+  .draft-board th,
+  .draft-board td {
+    border: 1px solid #990bdb;
+    padding: 10px;
+    text-align: center;
+  }
+  
+  .draft-board th {
+    background-color: #9408f1;
+  }
+  
