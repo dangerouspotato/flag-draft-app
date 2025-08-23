@@ -144,9 +144,9 @@ app.post('/api/upload-csv', upload.single('file'), (req, res) => {
   // === parse ==============================================================
   const parser = csv({ mapHeaders: ({ header }) => headerClean(header) });
 
-  parser.on('headers', (headers) => {
-    console.log('[CSV] Cleaned headers:', headers);
-  });
+  // parser.on('headers', (headers) => {
+  //   console.log('[CSV] Cleaned headers:', headers);
+  // });
 
   fs.createReadStream(filePath)
     .pipe(parser)
@@ -167,7 +167,7 @@ app.post('/api/upload-csv', upload.single('file'), (req, res) => {
         captain:   findHeader(headers, EXACT.CAPTAIN, TOKENS.captain),
       };
 
-      console.log('[CSV] Header mapping (cleaned→picked):', key);
+      // console.log('[CSV] Header mapping (cleaned→picked):', key);
 
       const summary = [];
 
@@ -190,31 +190,31 @@ app.post('/api/upload-csv', upload.single('file'), (req, res) => {
         const captainInterest = key.captain ? String(r[key.captain] || '').trim() : '';
 
         // per-row debug: which header fed which value
-        console.log('[CSV] Row match', {
-          row: i,
-          headersUsed: {
-            name: key.name,
-            phone: key.phone,
-            jersey: key.jersey,
-            height: key.height,
-            resemblance: key.resemble,
-            skill: key.skill,
-            position: key.position,
-            packaged: key.packaged,
-            captain: key.captain,
-          },
-          valuesPulled: {
-            nameRaw,
-            phoneNumber,
-            jerseySize,
-            height,
-            resemblance,
-            skillLevel,
-            fieldPosition,
-            packaged,
-            captainInterest,
-          },
-        });
+        // console.log('[CSV] Row match', {
+        //   row: i,
+        //   headersUsed: {
+        //     name: key.name,
+        //     phone: key.phone,
+        //     jersey: key.jersey,
+        //     height: key.height,
+        //     resemblance: key.resemble,
+        //     skill: key.skill,
+        //     position: key.position,
+        //     packaged: key.packaged,
+        //     captain: key.captain,
+        //   },
+        //   valuesPulled: {
+        //     nameRaw,
+        //     phoneNumber,
+        //     jerseySize,
+        //     height,
+        //     resemblance,
+        //     skillLevel,
+        //     fieldPosition,
+        //     packaged,
+        //     captainInterest,
+        //   },
+        // });
 
         summary.push({
           row: i,
@@ -242,9 +242,9 @@ app.post('/api/upload-csv', upload.single('file'), (req, res) => {
         };
       });
 
-      // nice compact overview table (first 50 rows)
-      console.log('[CSV] Summary table (first 50 rows):');
-      try { console.table(summary.slice(0, 50)); } catch {}
+      // // nice compact overview table (first 50 rows)
+      // console.log('[CSV] Summary table (first 50 rows):');
+      // try { console.table(summary.slice(0, 50)); } catch {}
 
       try { fs.unlinkSync(filePath); } catch {}
       return res.json({ message: 'CSV processed successfully', players });
