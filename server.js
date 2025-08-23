@@ -116,6 +116,7 @@ app.post('/api/upload-csv', upload.single('file'), (req, res) => {
     POSITION: "Which field position would you like to play?",
     PACKAGE: "Package'd",
     CAPTAIN: "Captain",
+    ROOKIE: "Rookie"
   };
 
   const TOKENS = {
@@ -128,6 +129,7 @@ app.post('/api/upload-csv', upload.single('file'), (req, res) => {
     position: ['field', 'position'],
     packaged: ['package'],
     captain: ['captain'],
+    rookie: ['rookie']
   };
 
   const findHeader = (headers, exactText, tokens) => {
@@ -165,6 +167,7 @@ app.post('/api/upload-csv', upload.single('file'), (req, res) => {
         position:  findHeader(headers, EXACT.POSITION, TOKENS.position),
         packaged:  findHeader(headers, EXACT.PACKAGE, TOKENS.packaged),
         captain:   findHeader(headers, EXACT.CAPTAIN, TOKENS.captain),
+        rookie: findHeader(headers, EXACT.ROOKIE, TOKENS.rookie)
       };
 
       // console.log('[CSV] Header mapping (cleaned→picked):', key);
@@ -188,6 +191,7 @@ app.post('/api/upload-csv', upload.single('file'), (req, res) => {
         const fieldPosition = key.position ? String(r[key.position] || '').trim() : '';
         const packaged    = key.packaged ? String(r[key.packaged] || '').trim() : '';
         const captainInterest = key.captain ? String(r[key.captain] || '').trim() : '';
+        const rookie = key.rookie ? String(r[key.rookie] || '').trim():'';
 
         // per-row debug: which header fed which value
         // console.log('[CSV] Row match', {
@@ -202,6 +206,7 @@ app.post('/api/upload-csv', upload.single('file'), (req, res) => {
         //     position: key.position,
         //     packaged: key.packaged,
         //     captain: key.captain,
+        //     rookie: key.rookie
         //   },
         //   valuesPulled: {
         //     nameRaw,
@@ -213,6 +218,7 @@ app.post('/api/upload-csv', upload.single('file'), (req, res) => {
         //     fieldPosition,
         //     packaged,
         //     captainInterest,
+        //     rookie,
         //   },
         // });
 
@@ -225,6 +231,8 @@ app.post('/api/upload-csv', upload.single('file'), (req, res) => {
           comp: resemblance,
           skill: skillLevel,
           phone: phoneNumber,
+          captain: captainInterest,
+          rookie: rookie
         });
 
         return {
@@ -238,6 +246,7 @@ app.post('/api/upload-csv', upload.single('file'), (req, res) => {
           fieldPosition,
           packaged,
           captainInterest,
+          rookie,
           ...r, // keep original columns
         };
       });

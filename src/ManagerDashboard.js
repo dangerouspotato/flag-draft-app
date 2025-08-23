@@ -241,17 +241,21 @@ function ManagerDashboard() {
               <table className="players-table">
                 <colgroup>
                   <col style={{ width: 48 }} />
-                  <col style={{ width: '28%' }} />
-                  <col style={{ width: '10%' }} />
-                  <col style={{ width: '14%' }} />
+                  <col style={{ width: '5%' }} />
+                  <col style={{ width: '15%' }} />
+                  <col style={{ width: '20%' }} />
+                  <col style={{ width: '8%' }} />
+                  <col style={{ width: '12%' }} />
                   <col style={{ width: '8%' }} />
                   <col style={{ width: '10%' }} />
-                  <col style={{ width: '20%' }} />
+                  <col style={{ width: '18%' }} />
                   <col style={{ width: 80 }} />
                 </colgroup>
                 <thead>
                   <tr>
                     <th>#</th>
+                    <th>Rookie</th>
+                    <th>Package'd</th>
                     <th>Name</th>
                     <th>Pos</th>
                     <th>Skill</th>
@@ -264,6 +268,8 @@ function ManagerDashboard() {
                 <tbody>
                   {availablePlayers.map((p, i) => {
                     const obj = p.row || p;
+                    const rookie = p.rookie || '';
+                    const packaged = p.packaged || '';
                     const name  = displayName(p);
                     const pos   = obj.position || obj.fieldPosition || '';
                     const skill = obj.skill || obj.skillLevel || '';
@@ -273,6 +279,8 @@ function ManagerDashboard() {
                     return (
                       <tr key={p.id || i}>
                         <td>{i + 1}</td>
+                        <td>{rookie}</td>
+                        <td>{packaged}</td>
                         <td><strong>{name}</strong></td>
                         <td>{pos}</td>
                         <td>{skill}</td>
