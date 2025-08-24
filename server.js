@@ -15,6 +15,8 @@ const DATA_DIR = path.join(__dirname, 'data');
 const SNAPSHOT = path.join(DATA_DIR, 'state.json');
 const EVENTS   = path.join(DATA_DIR, 'events.jsonl');
 
+
+
 //Functions needed for keeping state between server boots//
 /*--------------------------------------------------------*/
 function ensureStore() {
@@ -164,7 +166,14 @@ app.get('/api/draft-state', (req, res) => {
 });
 
 
-
+app.post(['/api/captains-login','/api/captains_login'], (req, res) => {
+  const { username, password } = req.body;
+  if (username === 'captain' && password === 'test123') {
+    req.session.user = { username };
+    return res.json({ message: 'Logged in' });
+  }
+  res.status(401).json({ message: 'Invalid credentials' });
+});
 
 // Endpoint to login into manager draft
 app.post('/api/login', (req, res) => {

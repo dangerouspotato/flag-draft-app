@@ -4,6 +4,7 @@ import axios from 'axios';
 import io from 'socket.io-client';
 import DraftBoard from './DraftBoard';
 
+//axios.defaults.withCredentials = true; // if you haven’t globally set this
 const socket = io();
 
 // robust name helper (works with flat or nested {row:{...}})

@@ -19,11 +19,16 @@ import {
 } from '@mui/material';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
 import draftImage from './logo.PNG'; // Import your image
+import CaptainsLogin from './CaptainsLogin';
 
-const drawerWidth = 240;
+const drawerWidth = 160;
 
 function ProtectedRoute({ isAuthenticated, children }) {
   return isAuthenticated ? children : <Navigate to="/login" replace />;
+}
+
+function ProtectedCaptainRoute({ isAuthenticated, children }) {
+  return isAuthenticated ? children : <Navigate to="/captains-login" replace />;
 }
 
 function App() {
@@ -112,7 +117,14 @@ function App() {
                   </ProtectedRoute>
                 }
               />
-              <Route path="/captain" element={<CaptainDashboard />} />
+              <Route path="/captains-login"
+              element={<CaptainsLogin setIsAuthenticated={setIsAuthenticated}/>}
+              />
+              <Route path="/captain" 
+              element={
+                <ProtectedCaptainRoute isAuthenticated={isAuthenticated}>
+                  <CaptainDashboard />
+                </ProtectedCaptainRoute>} />
               <Route path="/spectator" element={<SpectatorView />} />
               <Route
                 path="/"
