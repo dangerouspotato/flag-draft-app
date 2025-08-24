@@ -21,7 +21,7 @@ import { ThemeProvider, createTheme } from '@mui/material/styles';
 import draftImage from './logo.PNG'; // Import your image
 import CaptainsLogin from './CaptainsLogin';
 
-const drawerWidth = 160;
+const drawerWidth = 125;
 
 function ProtectedRoute({ isAuthenticated, children }) {
   return isAuthenticated ? children : <Navigate to="/login" replace />;
