@@ -19,6 +19,68 @@ const displayName = (p) => {
   );
 };
 
+// grab the first non-empty value from a list of possible keys
+const pickField = (obj, keys) => {
+  for (const k of keys) {
+    const v = obj?.[k];
+    if (v !== undefined && v !== null && String(v).trim() !== '') return String(v).trim();
+  }
+  return '';
+};
+
+// normalize one player into the fields captains need
+const playerInfo = (p) => {
+  const o = (p && (p.row || p)) || {};
+  return {
+    name: displayName(p),
+    position: pickField(o, [
+      'position',
+      'fieldPosition',
+      'Which field position would you like to play?',
+      'Position'
+    ]),
+    skill: pickField(o, [
+      'skill',
+      'skillLevel',
+      'Skill Level - Level of play that honestly defines your current ability (used for Team Draft)',
+      'Skill'
+    ]),
+    height: pickField(o, [
+      'height',
+      'Height (used for Team Draft)',
+      'Ht'
+    ]),
+    phone: pickField(o, [
+      'phone',
+      'phoneNumber',
+      'Phone number',
+      'Phone Number',
+      'Phone'
+    ]),
+  };
+};
+
+const undoLastPick = async () => {
+  try {
+    await axios.post('/api/undo-pick', { count: 1 });
+    // socket will hydrate state
+  } catch (err) {
+    console.error(err);
+    alert(err?.response?.data?.message || 'Undo failed');
+  }
+};
+
+const resetEntireDraft = async () => {
+  if (!window.confirm('Reset the whole draft back to pre-start? This is irreversible.')) return;
+  try {
+    await axios.post('/api/reset-draft');
+  } catch (err) {
+    console.error(err);
+    alert(err?.response?.data?.message || 'Reset failed');
+  }
+};
+
+
 function ManagerDashboard() {
   const [file, setFile] = useState(null);
   const [config, setConfig] = useState({
@@ -185,6 +247,39 @@ function ManagerDashboard() {
     return roundPicks;
   });
 
+    // ---------- TXT export helpers ----------
+  const formatRosterText = (teamIdx) => {
+    const teamName = teamNamesFromConfig[teamIdx] || `Team ${teamIdx + 1}`;
+    const roster = teamRosters?.[teamIdx] || [];
+    const header = [
+      `${teamName} — Player Contact Sheet`,
+      `Generated: ${new Date().toLocaleString()}`,
+      ''
+    ];
+    const lines = roster.map((p, i) => {
+      const info = playerInfo(p);
+      return `${i + 1}. ${info.name}\n   Pos: ${info.position || '-'} | Skill: ${info.skill || '-'} | Ht: ${info.height || '-'} | Phone: ${info.phone || '-'}`;
+    });
+    return [...header, ...lines, ''].join('\n');
+  };
+
+  const downloadRosterTXT = (teamIdx) => {
+    const txt = formatRosterText(teamIdx);
+    const teamSafe = (teamNamesFromConfig[teamIdx] || `Team_${teamIdx + 1}`).replace(/[^\w\-]+/g, '_');
+    const blob = new Blob([txt], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${teamSafe}_Roster.txt`;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => {
+      URL.revokeObjectURL(url);
+      a.remove();
+    }, 0);
+  };
+  // ---------------------------------------
+
   return (
     <div className="container">
       <header className="header">
@@ -229,6 +324,24 @@ function ManagerDashboard() {
         <button className="button" onClick={startDraft}>Start Draft</button>
       </div>
 
+      <div className="section">
+        <h3>Admin Controls</h3>
+        <button
+          className="button"
+          onClick={undoLastPick}
+          disabled={!currentDraft.length}
+          title={currentDraft.length ? 'Undo last pick' : 'No picks to undo'}
+        >
+          ⟲ Undo last pick
+        </button>
+        <button
+          className="button"
+          style={{ marginLeft: 12, background: '#8b0000' }}
+          onClick={resetEntireDraft}
+        >
+          ✖ Reset draft
+        </button>
+      </div>
       <div className="section">
         <h3>Draft Pick Process</h3>
         {activeTeam === null ? (
@@ -314,22 +427,35 @@ function ManagerDashboard() {
 
       <div className="section">
         <h3>Team Rosters</h3>
-        {teamRosters.map((roster, teamIndex) => (
-          <div key={teamIndex}>
-            <h4>{teamNamesFromConfig[teamIndex] || `Team ${teamIndex + 1}`}</h4>
-            {roster.length > 0 ? (
-              <ul>
-                {roster.map((player, index) => (
-                  <li key={index}>{displayName(player)}</li>
-                ))}
-              </ul>
-            ) : (
-              <p>No players drafted yet.</p>
-            )}
-          </div>
-        ))}
+          {teamRosters.map((roster, teamIndex) => {
+            const teamName = teamNamesFromConfig[teamIndex] || `Team ${teamIndex + 1}`;
+            const canDownload = (roster?.length || 0) > 0;
+            return (
+              <div key={teamIndex}>
+                <h4 style={{ display: 'flex', alignItems: 'center', gap: 12, justifyContent: 'space-between' }}>
+                  <span>{teamName}</span>
+                  <button
+                    className="button button-xs"
+                    disabled={!canDownload}
+                    onClick={() => downloadRosterTXT(teamIndex, teamNamesFromConfig, teamRosters)}
+                    title={canDownload ? 'Download this team as TXT' : 'No players yet'}
+                  >
+                    Download TXT
+                  </button>
+                </h4>
+                {roster.length > 0 ? (
+                  <ul>
+                    {roster.map((player, index) => (
+                      <li key={index}>{displayName(player)}</li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p>No players drafted yet.</p>
+                )}
+              </div>
+            );
+          })}
       </div>
-
       <div className="section">
         <h3>Draft Picks History</h3>
         <ul>

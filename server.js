@@ -11,6 +11,79 @@ const app = express();
 const server = http.createServer(app);
 const io = socketIo(server, {cors: {origin:true, credentials: true}});
 
+const DATA_DIR = path.join(__dirname, 'data');
+const SNAPSHOT = path.join(DATA_DIR, 'state.json');
+const EVENTS   = path.join(DATA_DIR, 'events.jsonl');
+
+//Functions needed for keeping state between server boots//
+/*--------------------------------------------------------*/
+function ensureStore() {
+  try { if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR); } catch {}
+}
+
+function saveSnapshot(where = 'auto') {
+  ensureStore();
+  const payload = { players, draftConfig };
+  fs.writeFileSync(SNAPSHOT, JSON.stringify(payload, null, 2), 'utf8');
+  try {
+    fs.appendFileSync(EVENTS, JSON.stringify({ ts: Date.now(), type: 'snapshot', where }) + '\n');
+  } catch {}
+}
+
+function loadSnapshotIfAny() {
+  try {
+    if (!fs.existsSync(SNAPSHOT)) return false;
+    const { players: p = [], draftConfig: dc = {} } =
+      JSON.parse(fs.readFileSync(SNAPSHOT, 'utf8') || '{}');
+    players = Array.isArray(p) ? p : [];
+    // keep any new fields from current code but overlay saved ones
+    draftConfig = { ...draftConfig, ...dc };
+    return true;
+  } catch (e) {
+    console.warn('[persist] failed to load snapshot:', e?.message);
+    return false;
+  }
+}
+
+// serpentine math replayer — gives you the turn-state after N picks
+function serpAfter(picksCount, teamCount) {
+  let activeTeam = 0;
+  let orderDirection = 1; // 1 asc, -1 desc
+  let currentRound = 1;
+  let extraPickGiven = false;
+  for (let i = 0; i < picksCount; i++) {
+    if (orderDirection === 1) {
+      if (activeTeam < teamCount - 1) {
+        activeTeam++;
+      } else {
+        if (!extraPickGiven) {
+          extraPickGiven = true;
+        } else {
+          orderDirection = -1;
+          extraPickGiven = false;
+          activeTeam--;
+          currentRound++;
+        }
+      }
+    } else {
+      if (activeTeam > 0) {
+        activeTeam--;
+      } else {
+        if (!extraPickGiven) {
+          extraPickGiven = true;
+        } else {
+          orderDirection = 1;
+          extraPickGiven = false;
+          activeTeam++;
+          currentRound++;
+        }
+      }
+    }
+  }
+  return { activeTeam, orderDirection, currentRound, extraPickGiven };
+}
+/*----------------------------------------------------------------------*/
+
 // Middleware for JSON parsing
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -42,14 +115,33 @@ app.use(cors({origin: true, credentials: true}))
 const upload = multer({ dest: 'uploads/' });
 
 // In-memory storage for demo purposes
-let players = [];
-let draftConfig = {
+//let players = [];
+// let draftConfig = {
+//   numberOfTeams: 4,
+//   teamNames: ['Team 1', 'Team 2', 'Team 3', 'Team 4'],
+//   picksPerTeam: 5,
+//   draftType: 'traditional', // or 'serpentine'
+//   currentDraft: []
+// };
+// replace your current draftConfig init with this:
+const defaultDraftConfig = {
   numberOfTeams: 4,
   teamNames: ['Team 1', 'Team 2', 'Team 3', 'Team 4'],
   picksPerTeam: 5,
   draftType: 'traditional', // or 'serpentine'
-  currentDraft: []
+  currentDraft: [],
+  hasStarted: false,
+  activeTeam: null,
+  teamRosters: [],
+  availablePlayers: []
 };
+let players = [];
+let draftConfig = { ...defaultDraftConfig };
+
+// try to restore from disk
+loadSnapshotIfAny();
+
+
 
 // Endpoint to fetch the current draft state
 app.get('/api/draft-state', (req, res) => {
@@ -256,6 +348,7 @@ app.post('/api/upload-csv', upload.single('file'), (req, res) => {
       // try { console.table(summary.slice(0, 50)); } catch {}
 
       try { fs.unlinkSync(filePath); } catch {}
+      saveSnapshot('upload-csv');
       return res.json({ message: 'CSV processed successfully', players });
     })
     .on('error', (err) => {
@@ -278,6 +371,7 @@ app.post('/api/draft-config', (req, res) => {
     teamNames = teamNames.split(',').map(s => s.trim()).filter(Boolean);
   }
   draftConfig = { ...draftConfig, numberOfTeams, teamNames, picksPerTeam, draftType };
+  saveSnapshot('draft-config');
   res.json({ message: 'Draft configuration updated', draftConfig });
 });
 
@@ -295,7 +389,7 @@ app.post('/api/start-draft', (req, res) => {
 
   // Mark that the draft has started
   draftConfig.hasStarted = true;
-
+  draftConfig.undoStack = [];
   // Initialize serpentine draft-specific properties if needed
   if (draftConfig.draftType === 'serpentine') {
     draftConfig.orderDirection = 1; // 1 for ascending, -1 for descending
@@ -305,6 +399,7 @@ app.post('/api/start-draft', (req, res) => {
 
   // Broadcast the draft start along with initial state
   io.emit('draftStarted', { draftConfig, availablePlayers: draftConfig.availablePlayers });
+  saveSnapshot('start-draft');
   res.json({ message: 'Draft started', draftConfig });
 });
 
@@ -325,6 +420,15 @@ app.post('/api/draft-pick', (req, res) => {
   if (playerIndex === -1) {
     return res.status(404).json({ message: 'Player not found or already taken' });
   }
+
+  // -- snapshot pre-pick for undo --
+  if (!draftConfig.undoStack) draftConfig.undoStack = [];
+  draftConfig.undoStack.push({
+    activeTeam: draftConfig.activeTeam,
+    orderDirection: draftConfig.orderDirection ?? 1,
+    extraPickGiven: !!draftConfig.extraPickGiven,
+    currentRound: draftConfig.currentRound ?? 1
+  });
 
   // Remove the player from the available list
   const player = draftConfig.availablePlayers.splice(playerIndex, 1)[0];
@@ -392,12 +496,82 @@ app.post('/api/draft-pick', (req, res) => {
     orderDirection: draftConfig.orderDirection,
     currentRound: draftConfig.currentRound,
   });
-
+  saveSnapshot('draft-pick');
   res.json({ message: 'Draft pick recorded', team: currentTeam, player });
 });
 
 
+// Undo last N picks (default 1). Each press = undo 1.
+app.post('/api/undo-pick', (req, res) => {
+  const count = Math.max(1, parseInt(req.body?.count || 1, 10));
+  let undone = 0;
 
+  for (let i = 0; i < count; i++) {
+    if (!draftConfig.currentDraft?.length) break;
+    if (!draftConfig.undoStack?.length) break;
+
+    const lastPick = draftConfig.currentDraft.pop();       // { team, player }
+    const snap = draftConfig.undoStack.pop() || {};
+
+    // remove the pick from that team’s roster (last entry)
+    const teamIdx = Number(lastPick.team);
+    const r = draftConfig.teamRosters?.[teamIdx];
+    if (Array.isArray(r) && r.length) r.pop();
+
+    // put player back to available (front so it’s easy to find)
+    if (lastPick.player) {
+      draftConfig.availablePlayers = [lastPick.player, ...(draftConfig.availablePlayers || [])];
+    }
+
+    // restore pre-pick serp/trad position
+    draftConfig.activeTeam = snap.activeTeam ?? draftConfig.activeTeam ?? 0;
+    draftConfig.orderDirection = snap.orderDirection ?? draftConfig.orderDirection ?? 1;
+    draftConfig.extraPickGiven = !!(snap.extraPickGiven ?? draftConfig.extraPickGiven);
+    draftConfig.currentRound = snap.currentRound ?? draftConfig.currentRound ?? 1;
+
+    undone++;
+  }
+
+  const payload = {
+    activeTeam: draftConfig.activeTeam,
+    availablePlayers: draftConfig.availablePlayers,
+    teamRosters: draftConfig.teamRosters,
+    currentDraft: draftConfig.currentDraft,
+    orderDirection: draftConfig.orderDirection,
+    currentRound: draftConfig.currentRound,
+    draftConfig
+  };
+
+  io.emit('draftUpdate', payload);
+  return res.json({ message: `Undid ${undone} pick(s)`, ...payload });
+});
+
+// Reset the entire draft to pre-start (config + players stay loaded)
+app.post('/api/reset-draft', (_req, res) => {
+  draftConfig.currentDraft = [];
+  draftConfig.teamRosters = [];
+  draftConfig.availablePlayers = (players || []).slice(); // all players back
+  draftConfig.activeTeam = null;   // nothing active until start
+  draftConfig.hasStarted = false;  // draft not started
+  draftConfig.orderDirection = 1;
+  draftConfig.currentRound = 1;
+  draftConfig.extraPickGiven = false;
+  draftConfig.undoStack = [];
+
+  const payload = {
+    activeTeam: draftConfig.activeTeam,
+    availablePlayers: draftConfig.availablePlayers,
+    teamRosters: draftConfig.teamRosters,
+    currentDraft: draftConfig.currentDraft,
+    orderDirection: draftConfig.orderDirection,
+    currentRound: draftConfig.currentRound,
+    draftConfig
+  };
+
+  // broadcast so captain/spectators snap back instantly
+  io.emit('draftUpdate', payload);
+  return res.json({ message: 'Draft reset to pre-start.', ...payload });
+});
 
 
 // Serve static files (if you build your React app into a "public" folder)

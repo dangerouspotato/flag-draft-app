@@ -19,6 +19,47 @@ const displayName = (p) => {
   );
 };
 
+// grab the first non-empty value from a list of possible keys
+const pickField = (obj, keys) => {
+  for (const k of keys) {
+    const v = obj?.[k];
+    if (v !== undefined && v !== null && String(v).trim() !== '') return String(v).trim();
+  }
+  return '';
+};
+
+// normalize one player into the fields captains need
+const playerInfo = (p) => {
+  const o = (p && (p.row || p)) || {};
+  return {
+    name: displayName(p),
+    position: pickField(o, [
+      'position',
+      'fieldPosition',
+      'Which field position would you like to play?',
+      'Position'
+    ]),
+    skill: pickField(o, [
+      'skill',
+      'skillLevel',
+      'Skill Level - Level of play that honestly defines your current ability (used for Team Draft)',
+      'Skill'
+    ]),
+    height: pickField(o, [
+      'height',
+      'Height (used for Team Draft)',
+      'Ht'
+    ]),
+    phone: pickField(o, [
+      'phone',
+      'phoneNumber',
+      'Phone number',
+      'Phone Number',
+      'Phone'
+    ]),
+  };
+};
+
 export default function CaptainDashboard() {
   // keep a local config mirror so team names render right
   const [config, setConfig] = useState({
@@ -123,6 +164,40 @@ export default function CaptainDashboard() {
     return roundPicks;
   });
 
+    // ---------- TXT export helpers ----------
+  const formatRosterText = (teamIdx) => {
+    const teamName = teamNamesFromConfig[teamIdx] || `Team ${teamIdx + 1}`;
+    const roster = teamRosters?.[teamIdx] || [];
+    const header = [
+      `${teamName} — Player Contact Sheet`,
+      `Generated: ${new Date().toLocaleString()}`,
+      ''
+    ];
+    const lines = roster.map((p, i) => {
+      const info = playerInfo(p);
+      return `${i + 1}. ${info.name}\n   Pos: ${info.position || '-'} | Skill: ${info.skill || '-'} | Ht: ${info.height || '-'} | Phone: ${info.phone || '-'}`;
+    });
+    return [...header, ...lines, ''].join('\n');
+  };
+
+  const downloadRosterTXT = (teamIdx) => {
+    const txt = formatRosterText(teamIdx);
+    const teamSafe = (teamNamesFromConfig[teamIdx] || `Team_${teamIdx + 1}`).replace(/[^\w\-]+/g, '_');
+    const blob = new Blob([txt], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${teamSafe}_Roster.txt`;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => {
+      URL.revokeObjectURL(url);
+      a.remove();
+    }, 0);
+  };
+  // ---------------------------------------
+
+
   return (
     <div className="container">
       <header className="header">
@@ -208,25 +283,39 @@ export default function CaptainDashboard() {
         <DraftBoard teams={teamsForBoard} rounds={roundLabels} picks={picksForBoard} />
       </div>
 
-      <div className="section">
+            <div className="section">
         <h3>Team Rosters</h3>
-        {teamRosters.map((roster, teamIndex) => (
-          <div key={teamIndex}>
-            <h4>{teamNamesFromConfig[teamIndex] || `Team ${teamIndex + 1}`}</h4>
-            {roster.length > 0 ? (
-              <ul>
-                {roster.map((player, index) => (
-                  <li key={index}>{displayName(player)}</li>
-                ))}
-              </ul>
-            ) : (
-              <p>No players drafted yet.</p>
-            )}
-          </div>
-        ))}
+          {teamRosters.map((roster, teamIndex) => {
+            const teamName = teamNamesFromConfig[teamIndex] || `Team ${teamIndex + 1}`;
+            const canDownload = (roster?.length || 0) > 0;
+            return (
+              <div key={teamIndex}>
+                <h4 style={{ display: 'flex', alignItems: 'center', gap: 12, justifyContent: 'space-between' }}>
+                  <span>{teamName}</span>
+                  <button
+                    className="button button-xs"
+                    disabled={!canDownload}
+                    onClick={() => downloadRosterTXT(teamIndex, teamNamesFromConfig, teamRosters)}
+                    title={canDownload ? 'Download this team as TXT' : 'No players yet'}
+                  >
+                    Download TXT
+                  </button>
+                </h4>
+                {roster.length > 0 ? (
+                  <ul>
+                    {roster.map((player, index) => (
+                      <li key={index}>{displayName(player)}</li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p>No players drafted yet.</p>
+                )}
+              </div>
+            );
+          })}
       </div>
 
-      <div className="section">
+      {/* <div className="section">
         <h3>Draft Picks History</h3>
         <ul>
           {currentDraft.map((pick, index) => {
@@ -242,7 +331,7 @@ export default function CaptainDashboard() {
             );
           })}
         </ul>
-      </div>
+      </div> */}
     </div>
   );
 }
